@@ -77,6 +77,22 @@
 报错：`AttributeError: 'float' object has no attribute 'partition'`。
 修法：改为保留 `(报告期, 值)` 元组。
 
+**#15 新增缓存时引入的作用域错误**
+
+- **现象**：为了缩短等待，给服务端加了结果缓存。加完之后**每个诊断请求都失败**，客户端收到 `Empty reply from server`。
+- **根因**：
+  ```python
+  def _cache_get(key):
+      global _cache_hits        # 只声明了一个
+      ...
+          _cache_misses += 1    # ← 赋值了却没声明 global
+  ```
+  函数里对 `_cache_misses` 有赋值，Python 就把它当**局部变量**，于是 `UnboundLocalError`。
+  两个计数器其实根本没被用到。
+- **修法**：直接删掉这两个没用的计数器，问题消失。
+- **教训**：这类错误**代码审查时很容易看漏**（`global` 声明和赋值隔了十几行），
+  是**跑一次就能暴露**的那类问题 —— 又一次印证：写了不等于对。
+
 ### C. 前端缺陷
 
 | # | 现象 | 修法 |

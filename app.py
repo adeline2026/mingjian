@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 import traceback
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +26,35 @@ HERE = Path(__file__).resolve().parent
 WEB_DIR = HERE / "web"
 DEFAULT_PEERS = "000858.SZ,000568.SZ,002304.SZ"
 HOST, PORT = "127.0.0.1", 8765
+
+# ---------------------------------------------------------------- 结果缓存
+# 一次诊断约 10 秒、17 次上游请求。刷新页面 / 来回切换同一只股票时，
+# 如果每次都重跑，既慢又容易把上游打到限流。这里做 10 分钟的进程内缓存。
+_CACHE: dict[str, tuple[float, dict]] = {}
+_CACHE_TTL = 600          # 秒
+_CACHE_MAX = 64           # 条数上限，超出按写入时间淘汰最旧
+_CACHE_LOCK = threading.Lock()
+
+
+def _cache_get(key: str) -> dict | None:
+    with _CACHE_LOCK:
+        entry = _CACHE.get(key)
+        if not entry:
+            return None
+        ts, val = entry
+        if time.time() - ts > _CACHE_TTL:
+            _CACHE.pop(key, None)
+            return None
+        return dict(val)          # 浅拷贝：调用方改动不会污染缓存对象
+
+
+def _cache_put(key: str, val: dict) -> None:
+    with _CACHE_LOCK:
+        if len(_CACHE) >= _CACHE_MAX:
+            oldest = sorted(_CACHE.items(), key=lambda kv: kv[1][0])[:8]
+            for k, _ in oldest:
+                _CACHE.pop(k, None)
+        _CACHE[key] = (time.time(), dict(val))
 
 
 def normalize_code(raw: str) -> str:
@@ -101,6 +132,14 @@ class Handler(BaseHTTPRequestHandler):
             if not code:
                 self._json(400, {"error": "缺少参数 code", "示例": "/api/diagnose?code=600519.SH"})
                 return
+
+            key = "\x01".join([code, ",".join(peers), question, ctype])
+            cached = _cache_get(key)
+            if cached is not None:
+                cached["served_from_cache"] = True
+                self._json(200, cached)
+                return
+
             try:
                 result = diagnose.diagnose(code, peers=peers,
                                            question=question, company_type=ctype)
@@ -108,6 +147,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(500, {"error": "诊断过程异常",
                                  "traceback": traceback.format_exc()[-1800:]})
                 return
+            result["served_from_cache"] = False
+            _cache_put(key, result)
             self._json(200, result)
             return
 

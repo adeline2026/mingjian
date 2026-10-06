@@ -546,6 +546,7 @@ function hideStatus(){
 
 var DATA = null;
 var SHOW_ALL = false;
+var INFLIGHT = null;      // 正在跑的诊断请求，新请求会先取消它
 
 function visibleEvidence(){
   if (!DATA) return [];
@@ -567,10 +568,20 @@ function renderAll(){
 }
 
 async function runDiagnosis(code, peers, question, ctype){
+  // 关键：先把上一次还在飞的请求取消掉。
+  // 否则连点 / 换股票 / 点问题 chip 会让多个诊断并发叠加 ——
+  // 每个诊断内部还有 3 路并发，几个叠起来就把上游打到限流，越等越久。
+  if (INFLIGHT){
+    try { INFLIGHT.abort(); } catch (e) { /* 忽略 */ }
+  }
+  var ctrl = new AbortController();
+  INFLIGHT = ctrl;
+
   var go = document.getElementById('go');
   go.disabled = true;
   document.getElementById('result').hidden = true;
   document.getElementById('routing').hidden = true;
+
   var t0 = Date.now();
   var tick = setInterval(function(){
     var s = Math.round((Date.now() - t0) / 1000);
@@ -584,7 +595,7 @@ async function runDiagnosis(code, peers, question, ctype){
   if (ctype && ctype !== 'auto') url += '&type=' + encodeURIComponent(ctype);
 
   try {
-    var resp = await fetch(url);
+    var resp = await fetch(url, { signal: ctrl.signal });
     var text = await resp.text();
     if (!resp.ok) throw new Error('HTTP ' + resp.status + '：' + text.slice(0, 300));
     DATA = JSON.parse(text);
@@ -605,6 +616,10 @@ async function runDiagnosis(code, peers, question, ctype){
     document.getElementById('result').hidden = false;
 
     var notes = [];
+    if (DATA.served_from_cache) {
+      notes.push('本次结果来自缓存（数据时点 ' + esc(fmtStamp(DATA.generated_at)) +
+                 '），未重新取数。换股票或改问题会重新取。');
+    }
     notes.push('取数 ' + (DATA.fetch_log || []).length + ' 次，其中失败 ' + failed.length +
                ' 次（已如实标为「未知」）。');
     if (llm.status === 'ok') {
@@ -620,6 +635,7 @@ async function runDiagnosis(code, peers, question, ctype){
     showStatus('ok', notes.join('<br>'));
 
   } catch (err) {
+    if (err.name === 'AbortError') return;   // 被新请求取代，静默退出，不报错
     DATA = null;
     showStatus('error',
       '<b>诊断失败。</b>没有生成任何结论，也没有用模拟数据代替。<br>' +
@@ -628,7 +644,11 @@ async function runDiagnosis(code, peers, question, ctype){
       '② 股票代码是否正确 ③ 网络是否可达 fuyao.aicubes.cn</pre>');
   } finally {
     clearInterval(tick);
-    go.disabled = false;
+    // 只有"当前这个请求仍是最新的"时才解锁按钮，避免旧请求提前解锁
+    if (INFLIGHT === ctrl){
+      INFLIGHT = null;
+      go.disabled = false;
+    }
   }
 }
 

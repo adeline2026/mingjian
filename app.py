@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -25,7 +26,12 @@ import diagnose
 HERE = Path(__file__).resolve().parent
 WEB_DIR = HERE / "web"
 DEFAULT_PEERS = "000858.SZ,000568.SZ,002304.SZ"
-HOST, PORT = "127.0.0.1", 8765
+
+# 本地跑：127.0.0.1:8765（只允许本机访问，安全）
+# 部署平台会注入 PORT 环境变量，此时改为监听 0.0.0.0 并用它给的端口
+PORT = int(os.environ.get("PORT", "8765"))
+HOST = os.environ.get("HOST") or ("0.0.0.0" if "PORT" in os.environ else "127.0.0.1")
+IS_DEPLOYED = "PORT" in os.environ
 
 # ---------------------------------------------------------------- 结果缓存
 # 一次诊断约 10 秒、17 次上游请求。刷新页面 / 来回切换同一只股票时，
@@ -94,9 +100,9 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("[http] 客户端提前断开，响应未写完（通常是因为等待超时）\n")
 
     def do_HEAD(self) -> None:  # noqa: N802
-        """健康检查。预览面板会先发 HEAD，不实现它会返回 501，面板会认为服务异常。"""
+        """健康检查。预览面板与部署平台都会先发 HEAD，不实现它会返回 501。"""
         parsed = urllib.parse.urlparse(self.path)
-        known = parsed.path in ("/", "/index.html", "/api/diagnose")
+        known = parsed.path in ("/", "/index.html", "/api/diagnose", "/healthz")
         self.send_response(200 if known else 404)
         self.send_header("Content-Type",
                          "text/html; charset=utf-8"
@@ -119,6 +125,20 @@ class Handler(BaseHTTPRequestHandler):
                            "text/plain; charset=utf-8")
                 return
             self._send(200, index.read_bytes(), "text/html; charset=utf-8")
+            return
+
+        if parsed.path == "/healthz":
+            # 部署排查用：能打开这个地址就说明服务活着；两个 key 的状态也一并暴露（不含明文）
+            import llm
+            cfg = llm.LLMConfig.from_env()
+            self._json(200, {
+                "ok": True,
+                "deployed": IS_DEPLOYED,
+                "fuyao_key_configured": bool(diagnose.fuyao.load_api_key()),
+                "llm_configured": bool(cfg.enabled),
+                "llm_model": cfg.model or None,
+                "evidence_rules": "L-00~L-09 / L-11 / L-12 / L-20",
+            })
             return
 
         if parsed.path == "/api/diagnose":
@@ -167,8 +187,11 @@ def main() -> int:
         print("页面仍会启动，但所有取数都会如实失败并显示为「未知证据」。\n")
 
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"明鉴已启动： http://{HOST}:{PORT}/")
-    print("按 Ctrl+C 停止。")
+    if IS_DEPLOYED:
+        print(f"明鉴已启动（部署模式）：监听 {HOST}:{PORT}")
+    else:
+        print(f"明鉴已启动： http://{HOST}:{PORT}/")
+        print("按 Ctrl+C 停止。")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

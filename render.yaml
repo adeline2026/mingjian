@@ -1,0 +1,32 @@
+# Render 部署蓝图 —— 在 Render 里选 "New +" → "Blueprint"，指向本仓库即可。
+#
+# 两个密钥不写在这里（写进来就等于泄露）。Render 会提示你手动填：
+#   HITHINK_FINANCE_API_KEY  —— 扶摇 API Key
+#   LLM_API_KEY              —— 推断层模型的 Key
+#
+# 注意：部署后密钥只存在于 Render 的环境变量里，不进仓库、不进日志。
+
+services:
+  - type: web
+    name: mingjian
+    runtime: python
+    plan: free
+    region: singapore          # 离国内最近的区域，比默认的俄勒冈快
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+      # ── 推断层（非敏感项，可以直接写）─────────────────────
+      - key: LLM_BASE_URL
+        value: https://open.bigmodel.cn/api/paas/v4
+      - key: LLM_MODEL
+        value: glm-4-flash-250414
+
+      # ── 密钥（sync: false = 不在蓝图里存值，Render 会提示你填）──
+      - key: HITHINK_FINANCE_API_KEY
+        sync: false
+      - key: LLM_API_KEY
+        sync: false

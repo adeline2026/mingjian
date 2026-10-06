@@ -177,6 +177,34 @@ python app.py
 python diagnose.py 600519.SH --peers 000858.SZ,000568.SZ,002304.SZ --out out/600519.json
 ```
 
+### 部署到 Render
+
+仓库里带了 `render.yaml`，可以一键部署：
+
+1. 打开 <https://dashboard.render.com/> → **New +** → **Blueprint**
+2. 连接本仓库，Render 会读取 `render.yaml`
+3. 它会提示你填两个密钥（蓝图里只写了**变量名**，不含值）：
+   - `HITHINK_FINANCE_API_KEY` —— 扶摇 API Key
+   - `LLM_API_KEY` —— 推断层模型 Key
+4. 点 **Apply**，等构建完成
+
+部署后打开 `/healthz` 自检，会直接告诉你密钥配没配对：
+
+```json
+{"ok": true, "deployed": true, "fuyao_key_configured": true,
+ "llm_configured": true, "llm_model": "glm-4-flash-250414"}
+```
+
+**关于免费层**：Render 免费实例在 15 分钟无访问后会休眠，下次访问需要约一分钟唤醒。
+演示或评审前，先打开一次页面预热。
+
+**本地与部署的行为差异**（`app.py` 自动判断）：
+
+| 环境 | 监听地址 | 判断依据 |
+|---|---|---|
+| 本地 | `127.0.0.1:8765`（仅本机可访问，更安全） | 没有 `PORT` 环境变量 |
+| 部署 | `0.0.0.0:$PORT` | 平台注入了 `PORT` |
+
 ## 6. 密钥与安全
 
 ### 密钥放在哪里
@@ -249,6 +277,7 @@ python app.py     # 启动产品
 ├── diagnose.py       证据引擎：双坐标模型 + 规则库
 ├── llm.py            推断层：唯一使用模型的地方，带引用校验；可单独自检
 ├── check_secrets.py  打包/推送前的密钥自检
+├── render.yaml       Render 部署蓝图（密钥写成 sync:false，值不进仓库）
 ├── test_llm.py       推断层约束的单元测试（23 个）
 ├── test_rules.py     规则引擎的单元测试（18 个：类型识别 + 问题路由 + 区间统计）
 ├── web/index.html    前端（构成条 / 证据卡片 / 三层钻取）

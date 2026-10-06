@@ -19,6 +19,9 @@ FACTS = [
      "claim": "中报营业收入同比增速连续 3 年回落 <b>17.76% → 9.10% → 1.47%</b>"},
     {"id": "E-02", "cog": "fact", "lean": "pos", "dim": "经营质量",
      "claim": "2025 年报加权平均ROE <b>32.53%</b>"},
+    # 与 E-01 同属「财务趋势」，用于验证「只引用单一维度会被丢弃」
+    {"id": "E-03", "cog": "fact", "lean": "neg", "dim": "财务趋势",
+     "claim": "中报归母净利润同比 <b>-1.95%</b>"},
 ]
 UNKNOWN_ITEM = {"id": "E-09", "cog": "unknown", "lean": None, "dim": "估值",
                 "claim": "没有历史估值序列，无法判断分位"}
@@ -69,10 +72,48 @@ class InferenceGate(unittest.TestCase):
     # ---- 闸门二：引用校验 ----
     def test_valid_inference_kept(self):
         outcome, _ = self._run(
-            '{"inferences":[{"claim":"收入增速连续三年放缓","cites":["E-01"]}]}')
+            '{"inferences":[{"claim":"盈利仍处高位但增速在放缓","cites":["E-01","E-02"]}]}')
         self.assertEqual(outcome.status, "ok")
         self.assertEqual(len(outcome.inferences), 1)
-        self.assertEqual(outcome.inferences[0]["cites"], ["E-01"])
+        self.assertEqual(outcome.inferences[0]["cites"], ["E-01", "E-02"])
+
+    def test_same_dimension_two_cites_kept(self):
+        """同维度两条事实之间的比较（例如两个估值指标）是有价值的，不应被拦。"""
+        outcome, _ = self._run(
+            '{"inferences":[{"claim":"收入端与利润端同步走弱","cites":["E-01","E-03"]}]}')
+        self.assertEqual(len(outcome.inferences), 1)
+
+    def test_single_citation_dropped(self):
+        """L-11：只引用 1 条 = 复述而非综合，必须丢弃。"""
+        outcome, _ = self._run(
+            '{"inferences":[{"claim":"增速放缓","cites":["E-01"]}]}')
+        self.assertEqual(outcome.inferences, [])
+        self.assertIn("只引用了 1 条事实", outcome.dropped[0]["reason"])
+
+    def test_forbidden_benchmark_dropped(self):
+        """L-12：凭空引入「行业平均」这类基准必须被拦下。
+
+        这是实测抓到的真问题：模型引用的编号都是真的，但在真事实外面
+        挂了一句凭空捏造的基准 —— 引用校验挡不住，只能靠关键词闸门。"""
+        outcome, _ = self._run(
+            '{"inferences":[{"claim":"营收增速仍低于行业平均水平","cites":["E-01","E-02"]}]}')
+        self.assertEqual(outcome.inferences, [], "事实清单里没有基准，不得做比较")
+        self.assertIn("行业平均", outcome.dropped[0]["reason"])
+        self.assertIn("L-12", outcome.dropped[0]["reason"])
+
+    def test_forbidden_prediction_dropped(self):
+        """L-12：预测与建议同样越界。"""
+        outcome, _ = self._run(
+            '{"inferences":[{"claim":"盈利能力较强，预计明年将继续增长","cites":["E-01","E-02"]}]}')
+        self.assertEqual(outcome.inferences, [])
+        self.assertIn("预计", outcome.dropped[0]["reason"])
+
+    def test_forbidden_advice_dropped(self):
+        """L-12：买卖建议必须被拦下。"""
+        outcome, _ = self._run(
+            '{"inferences":[{"claim":"盈利稳健，建议买入","cites":["E-01","E-02"]}]}')
+        self.assertEqual(outcome.inferences, [])
+        self.assertIn("建议买入", outcome.dropped[0]["reason"])
 
     def test_hallucinated_cite_dropped(self):
         outcome, _ = self._run(
@@ -88,7 +129,7 @@ class InferenceGate(unittest.TestCase):
 
     def test_mixed_valid_and_invalid(self):
         outcome, _ = self._run(json.dumps({"inferences": [
-            {"claim": "增速放缓", "cites": ["E-01"]},
+            {"claim": "盈利仍强但增速在放缓", "cites": ["E-01", "E-02"]},
             {"claim": "编造的", "cites": ["E-77"]},
         ]}))
         self.assertEqual(len(outcome.inferences), 1)
@@ -154,7 +195,7 @@ class JsonModeFallback(unittest.TestCase):
             if json_mode:
                 return False, None, "HTTP 400 Unsupported parameter: response_format"
             return True, {"choices": [{"message": {"content":
-                '```json\n{"inferences":[{"claim":"营收增速连续三年放缓","cites":["E-01"]}]}\n```'}}]}, ""
+                '```json\n{"inferences":[{"claim":"盈利仍强但增速在放缓","cites":["E-01","E-02"]}]}\n```'}}]}, ""
 
         outcome = self._with(fake)
         self.assertEqual(calls, [True, False], "应先试 json_mode，失败后回退")

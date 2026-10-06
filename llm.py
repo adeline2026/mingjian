@@ -28,14 +28,30 @@ from typing import Any
 
 import fuyao
 
+# 引用校验只能保证「引用的编号是真的」，不能保证「整句话都有依据」。
+# 模型完全可以在真事实外面挂一句假话（实测发生过：凭空写出「低于行业平均水平」）。
+# 所以再加一道关键词闸门，挡掉基准 / 预测 / 建议这三类越界表述。
+FORBIDDEN_PHRASES = (
+    # 未经提供的比较基准
+    "行业平均", "行业均值", "同业平均", "行业水平", "板块平均", "领先", "落后",
+    "跑赢", "跑输", "市场预期", "一致预期", "历史分位", "估值分位", "中枢",
+    # 预测
+    "预计", "预期", "将会", "有望", "目标价", "上涨空间", "下跌空间", "翻倍",
+    # 建议
+    "建议买入", "建议卖出", "建议持有", "买入", "卖出", "推荐", "可关注", "值得配置",
+)
+
 SYSTEM_PROMPT = """你是一个受严格约束的金融文本解读器。你的输出会被程序校验，违反任何一条即被整条丢弃。
 
 规则：
 1. 只能使用「事实清单」中列出的信息。不得引入任何外部知识，不得推算未列出的数字。
-2. 每条解读必须引用至少一个事实编号（形如 E-01）。
-3. 禁止给出买卖建议、涨跌预测、目标价、收益承诺。
-4. 禁止把事实清单中未标明方向的内容说成正向或负向。
-5. 只输出 JSON，不要任何解释、不要 markdown 代码块。
+2. **不得引入事实清单之外的任何比较基准** —— 包括「行业平均」「同业平均」「市场预期」
+   「历史分位」「领先 / 落后」「跑赢 / 跑输」。清单里没有基准，就不要做比较。
+3. **禁止预测与建议** —— 不得出现「预计」「将会」「有望」「目标价」「建议买入 / 卖出」。
+4. 每条解读必须引用**至少 2 条**事实编号。优先引用**不同维度**的事实以形成综合判断
+   （例如「盈利仍强，但增速在放缓」），而不是复述单条。
+5. 禁止把事实清单中未标明方向的内容说成正向或负向。
+6. 只输出 JSON，不要任何解释、不要 markdown 代码块。
 
 输出格式：
 {"inferences":[{"claim":"一句话解读，不超过60字","cites":["E-01","E-03"]}]}
@@ -126,7 +142,8 @@ def extract_json(text: str) -> str:
     return t.strip()
 
 
-def generate_inferences(facts: list[dict], cfg: LLMConfig | None = None) -> InferenceOutcome:
+def generate_inferences(facts: list[dict], cfg: LLMConfig | None = None,
+                        question: str = "") -> InferenceOutcome:
     """facts 必须是**事实类**证据（cog == 'fact'）。其余一律不传。"""
     cfg = cfg or LLMConfig.from_env()
     facts = [f for f in facts if f.get("cog") == "fact"]
@@ -144,8 +161,10 @@ def generate_inferences(facts: list[dict], cfg: LLMConfig | None = None) -> Infe
     lines = []
     for f in facts:
         lines.append(f"{f['id']}｜{f['dim']}｜{strip_tags(f['claim'])}")
-    user = ("事实清单（这是你的全部信息边界）：\n" + "\n".join(lines) +
-            "\n\n请给出解读。只输出 JSON。")
+    user = "事实清单（这是你的全部信息边界）：\n" + "\n".join(lines)
+    if question:
+        user += f"\n\n用户关心的是：{question}\n请围绕这一点给出解读。"
+    user += "\n\n只输出 JSON。"
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -172,6 +191,7 @@ def generate_inferences(facts: list[dict], cfg: LLMConfig | None = None) -> Infe
     outcome = InferenceOutcome(status="ok", raw=content, detail=fallback,
                                provider=cfg.provider, model=cfg.model)
     valid_ids = {f["id"] for f in facts}
+    dim_of = {f["id"]: f.get("dim", "") for f in facts}
 
     try:
         parsed = json.loads(extract_json(content))
@@ -194,15 +214,34 @@ def generate_inferences(facts: list[dict], cfg: LLMConfig | None = None) -> Infe
         if bad:
             outcome.dropped.append({"claim": claim, "reason": f"引用了不存在的事实 {bad}"})
             continue
+        cited_dims = {dim_of.get(c, "") for c in cites} - {""}
+        if len(cites) < 2:
+            outcome.dropped.append({
+                "claim": claim,
+                "reason": "只引用了 1 条事实，属于复述而非综合，按规则 L-11 丢弃",
+            })
+            continue
+        hit = [p for p in FORBIDDEN_PHRASES if p in claim]
+        if hit:
+            outcome.dropped.append({
+                "claim": claim,
+                "reason": f"出现事实清单之外的表述「{'、'.join(hit)}」（基准 / 预测 / 建议），"
+                          f"按规则 L-12 丢弃",
+            })
+            continue
         outcome.inferences.append({
             "dim": "推断解读",
             "cog": "infer",
             "lean": None,          # 倾向由规则给出，不由模型自评
             "claim": claim,
-            "meta": f"由模型基于引用的 {len(cites)} 条事实生成：{cfg.provider} / {cfg.model}",
-            "rule": "L-10　推断必须引用已存在的事实；引用不存在的事实，整条丢弃。"
+            "meta": f"由模型基于引用的 {len(cites)} 条事实生成：{cfg.provider} / {cfg.model}"
+                    + (f"（跨 {len(cited_dims)} 个维度）" if len(cited_dims) > 1 else ""),
+            "rule": "L-11　推断必须引用至少 2 条事实（优先跨维度）——只引用单条视为复述，丢弃。"
+                    "L-12　解读中不得出现事实清单之外的比较基准、预测或建议——"
+                    "引用校验只能证明「引用的编号是真的」，挡不住在真事实外面挂假话，故另设关键词闸门。"
                     "倾向不由模型自评，交由规则继承所引用事实的多数方向。",
-            "source": {"llm_provider": cfg.provider, "llm_model": cfg.model},
+            "source": {"llm_provider": cfg.provider, "llm_model": cfg.model,
+                       "citations": cites, "cited_dimensions": sorted(cited_dims)},
             "series": [],
             "cites": cites,
             "note": "",

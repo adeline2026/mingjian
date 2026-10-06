@@ -28,19 +28,43 @@ body{margin:0;background:var(--scaffold);color:var(--ink);font-family:var(--sans
 .stamp{font-size:12px;color:var(--muted);text-align:right;line-height:1.7}
 
 .ask{padding:22px 0 4px}
-.ask form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.ask form{display:block}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.row + .row{margin-top:12px}
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:11px;color:var(--muted);letter-spacing:.05em}
-.field input{font:inherit;font-size:14px;padding:7px 11px;border:1px solid var(--rule);
-  background:var(--paper);color:var(--ink);font-family:var(--mono)}
-.field input:focus{outline:2px solid var(--ink);outline-offset:-1px}
+.field input,.field select{font:inherit;font-size:14px;padding:7px 11px;
+  border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
+.field input{font-family:var(--mono)}
+.field select{min-width:160px}
+.autohint{font-size:11px;color:var(--muted);max-width:210px;line-height:1.5}
+.autohint b{color:var(--ink)}
+.field input:focus,.field select:focus{outline:2px solid var(--ink);outline-offset:-1px}
 .field.wide{flex:1;min-width:200px}
 .field.wide input{width:100%;font-family:var(--sans)}
 .go{font:inherit;font-size:14px;padding:8px 20px;border:1px solid var(--ink);
-  background:var(--ink);color:#fff;cursor:pointer}
+  background:var(--ink);color:#fff;cursor:pointer;align-self:flex-end}
 .go:hover{background:#000}
 .go:disabled{opacity:.45;cursor:progress}
 .hint{font-size:12px;color:var(--muted);margin-top:8px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--rule);background:transparent;
+  color:var(--ink2);padding:5px 13px;border-radius:999px;cursor:pointer}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* ---------- 本次诊断的依据 ---------- */
+.routing{margin-top:22px;border:1px solid var(--hair);border-left:4px solid var(--ink);
+  background:#FAFAFA;padding:12px 16px;font-size:13px;line-height:1.8}
+.routing h4{margin:0 0 6px;font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.routing .kv{display:grid;grid-template-columns:76px 1fr;gap:3px 12px}
+.routing .k{color:var(--muted)}
+.routing .dims{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.routing .dchip{border:1px solid var(--rule);padding:1px 9px;font-size:12px}
+.routing .dchip.on{border-color:var(--ink);background:var(--ink);color:#fff}
+.routing .toggle{margin-top:8px;font:inherit;font-size:12px;background:none;border:0;
+  padding:0;color:var(--ink2);cursor:pointer;text-decoration:underline;
+  text-underline-offset:3px}
 
 .status{margin-top:18px;padding:12px 16px;border:1px solid var(--rule);
   border-left-width:4px;font-size:13px;line-height:1.7;display:none}
@@ -180,17 +204,42 @@ body{margin:0;background:var(--scaffold);color:var(--ink);font-family:var(--sans
 
   <section class="ask">
     <form id="form">
-      <div class="field">
-        <label for="code">股票代码</label>
-        <input id="code" name="code" value="600519.SH" spellcheck="false" autocomplete="off">
+      <div class="row">
+        <div class="field">
+          <label for="code">股票代码</label>
+          <input id="code" name="code" value="600519.SH" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="field wide">
+          <label for="peers">同业（逗号分隔，可留空）</label>
+          <input id="peers" name="peers" value="000858.SZ,000568.SZ,002304.SZ" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="ctype">公司类型</label>
+          <select id="ctype">
+            <option value="auto">自动识别</option>
+            <option value="通用">通用</option>
+            <option value="金融/地产">金融/地产</option>
+            <option value="高毛利（消费/软件）">高毛利（消费/软件）</option>
+            <option value="高杠杆（非金融）">高杠杆（非金融）</option>
+          </select>
+          <div class="autohint" id="ctypeHint"></div>
+        </div>
       </div>
-      <div class="field wide">
-        <label for="peers">同业（逗号分隔，可留空）</label>
-        <input id="peers" name="peers" value="000858.SZ,000568.SZ,002304.SZ" spellcheck="false" autocomplete="off">
+      <div class="row">
+        <div class="field wide">
+          <label for="question">你想了解什么 —— 决定本次展示哪些维度</label>
+          <input id="question" placeholder="例如：现在贵不贵 / 有没有需要警惕的事" autocomplete="off">
+        </div>
+        <button class="go" id="go" type="submit">诊断</button>
       </div>
-      <button class="go" id="go" type="submit">诊断</button>
+      <div class="chips" id="chips">
+        <button type="button" class="chip" data-q="这家公司现在什么状态">这家公司现在什么状态</button>
+        <button type="button" class="chip" data-q="它赚钱能力怎么样">它赚钱能力怎么样</button>
+        <button type="button" class="chip" data-q="现在贵不贵">现在贵不贵</button>
+        <button type="button" class="chip" data-q="有没有需要警惕的事">有没有需要警惕的事</button>
+      </div>
     </form>
-    <div class="hint">这是真实取数：每次诊断会实时调用扶摇接口。取不到的项会被如实标注为「未知」，不会补零或估算。</div>
+    <div class="hint">真实取数：每次诊断实时调用扶摇接口。「推断解读」由模型生成，只允许引用已存在的事实。取不到的项如实标注为「未知」，不补零、不估算。</div>
   </section>
 
   <div class="status" id="status"></div>
@@ -205,6 +254,8 @@ body{margin:0;background:var(--scaffold);color:var(--ink);font-family:var(--sans
         <div class="quote" id="subjQuote"></div>
       </div>
     </section>
+
+    <div class="routing" id="routing" hidden></div>
 
     <section class="composition">
       <div class="compo-head">
@@ -309,9 +360,15 @@ function renderDrill(e){
     }).join('') + '</div>';
   }
   if (e.cites && e.cites.length){
-    out += '<h4>该推断引用的证据</h4><ul class="cites">' + e.cites.map(function(c){
-      return '<li>' + esc(c) + '</li>';
-    }).join('') + '</ul>';
+    var all = (DATA && DATA.evidence) || [];
+    out += '<h4>该推断引用的证据（请据此自行核对）</h4><ul class="cites">' +
+      e.cites.map(function(c){
+        var src = all.filter(function(x){ return x.id === c; })[0];
+        return '<li><b>' + esc(c) + '</b>　' + (src ? src.claim : '（未找到该证据）') + '</li>';
+      }).join('') + '</ul>' +
+      '<div class="gap">模型只被允许引用上面这些事实，引用不存在的编号会被整条丢弃。' +
+      '但<b>解读本身仍可能出错</b> —— 它可能读错方向，或把两件事的关系说反。' +
+      '本产品不保证推断正确，只保证你能一键核对它引用了什么。</div>';
   }
   out += renderSource(e.source);
   if (e.note) out += '<div class="gap">' + esc(e.note) + '</div>';
@@ -343,10 +400,20 @@ function renderSections(evidence){
   }).join('');
 }
 
-function renderComposition(summary, total){
+function tally(evidence){
+  var byLean = {}, byCog = {};
+  evidence.forEach(function(e){
+    var l = e.lean || 'unknown';
+    byLean[l] = (byLean[l] || 0) + 1;
+    byCog[e.cog] = (byCog[e.cog] || 0) + 1;
+  });
+  return { byLean: byLean, byCog: byCog };
+}
+
+function renderComposition(evidence){
+  var t = tally(evidence), byLean = t.byLean, byCog = t.byCog;
   document.getElementById('compoNote').textContent =
-    '共 ' + total + ' 条证据，按倾向归类。点击任一段只看该类。颜色只给需要你注意的两类。';
-  var byLean = summary.by_lean || {}, byCog = summary.by_cog || {};
+    '本次展示 ' + evidence.length + ' 条证据，按倾向归类。点击任一段只看该类。';
   document.getElementById('bar').innerHTML = LEAN_ORDER.map(function(k){
     var n = byLean[k] || 0;
     return '<button class="seg seg--' + k + '" data-lean="' + k + '" aria-pressed="false" ' +
@@ -365,6 +432,56 @@ function renderComposition(summary, total){
     '<span><span class="k infer"></span>推断 ' + (byCog.infer || 0) + '</span>' +
     '<span><span class="k unknown"></span>未知 ' + (byCog.unknown || 0) + '</span>' +
     '<span>线型表示认知，颜色表示倾向</span>';
+}
+
+var ANALYSIS_DIMS = ['财务趋势', '经营质量', '估值', '行情特征'];
+var FIXED_DIMS = ['推断解读', '待验证问题'];
+
+function renderRouting(){
+  var el = document.getElementById('routing');
+  var r = DATA && DATA.routing;
+  if (!r){ el.hidden = true; return; }
+  el.hidden = false;
+  var ct = r.company_type || {};
+  var dims = r.dimensions || [];
+  var chips = ANALYSIS_DIMS.map(function(d){
+      return '<span class="dchip' + (dims.indexOf(d) >= 0 ? ' on' : '') + '">' + esc(d) + '</span>';
+    }).join('') +
+    FIXED_DIMS.map(function(d){ return '<span class="dchip on">' + esc(d) + '</span>'; }).join('');
+  var affected = (ct.affected && ct.affected.length)
+    ? '<br><span class="k">类型影响</span> ' + esc(ct.affected.join('；')) : '';
+  el.innerHTML =
+    '<h4>本次诊断的依据</h4>' +
+    '<div class="kv">' +
+      '<span class="k">你的问题</span><span>' +
+        (r.question ? esc(r.question) : '未指定 —— 展示全部维度') + '</span>' +
+      '<span class="k">问题路由</span><span>' + esc(r.rule) + '　' + esc(r.reason) + '</span>' +
+      '<span class="k">公司类型</span><span>' + esc(ct.type || '—') +
+        '　' + esc(ct.rule || '') + '　' + esc(ct.reason || '') + affected + '</span>' +
+    '</div>' +
+    '<div class="dims"><span class="k">展示维度</span>' + chips + '</div>' +
+    '<button class="toggle" id="toggleAll">' +
+      (SHOW_ALL ? '只看与问题相关的维度' : '显示全部维度') + '</button>';
+  var btn = document.getElementById('toggleAll');
+  if (btn) btn.addEventListener('click', function(){ SHOW_ALL = !SHOW_ALL; renderAll(); });
+}
+
+function renderCompanyTypeBadge(ct){
+  // 下拉框是「你的选择」，识别结果是「系统的判断」——两者必须分开显示，
+  // 否则用户会以为自动识别没生效（下拉框永远显示「自动识别」）。
+  var sel = document.getElementById('ctype');
+  var hint = document.getElementById('ctypeHint');
+  var autoOpt = sel ? sel.querySelector('option[value="auto"]') : null;
+  if (autoOpt) {
+    autoOpt.textContent = '自动识别' + (ct && ct.type ? '（当前：' + ct.type + '）' : '');
+  }
+  if (!hint) return;
+  if (!ct || !ct.type){ hint.textContent = ''; return; }
+  if (sel && sel.value !== 'auto'){
+    hint.innerHTML = '已手动指定，未使用自动识别';
+    return;
+  }
+  hint.innerHTML = '已识别为 <b>' + esc(ct.type) + '</b>（' + esc(ct.rule || '') + '）';
 }
 
 function renderSubject(subject){
@@ -427,42 +544,75 @@ function hideStatus(){
 
 /* ---------- 主流程 ---------- */
 
-async function runDiagnosis(code, peers){
+var DATA = null;
+var SHOW_ALL = false;
+
+function visibleEvidence(){
+  if (!DATA) return [];
+  var all = DATA.evidence || [];
+  if (SHOW_ALL) return all;
+  var dims = (DATA.routing && DATA.routing.dimensions) || null;
+  if (!dims) return all;
+  return all.filter(function(e){
+    return dims.indexOf(e.dim) >= 0 || FIXED_DIMS.indexOf(e.dim) >= 0;
+  });
+}
+
+function renderAll(){
+  var vis = visibleEvidence();
+  renderSections(vis);
+  renderComposition(vis);
+  renderRouting();
+  bindInteractions();
+}
+
+async function runDiagnosis(code, peers, question, ctype){
   var go = document.getElementById('go');
   go.disabled = true;
   document.getElementById('result').hidden = true;
-  showStatus('loading', '正在取数并计算证据。需要拉取多个报告期，通常 10–30 秒……');
+  document.getElementById('routing').hidden = true;
+  var t0 = Date.now();
+  var tick = setInterval(function(){
+    var s = Math.round((Date.now() - t0) / 1000);
+    showStatus('loading', '正在取数并计算证据…… 已用 <b>' + s + '</b> 秒。' +
+      '需要并发拉取多个报告期，通常 10–20 秒。');
+  }, 1000);
 
   var url = '/api/diagnose?code=' + encodeURIComponent(code);
   if (peers) url += '&peers=' + encodeURIComponent(peers);
+  if (question) url += '&question=' + encodeURIComponent(question);
+  if (ctype && ctype !== 'auto') url += '&type=' + encodeURIComponent(ctype);
 
   try {
     var resp = await fetch(url);
     var text = await resp.text();
     if (!resp.ok) throw new Error('HTTP ' + resp.status + '：' + text.slice(0, 300));
-    var data = JSON.parse(text);
+    DATA = JSON.parse(text);
+    SHOW_ALL = false;
 
-    var s = data.summary || {};
-    var failed = (data.fetch_log || []).filter(function(r){ return !r.ok; });
-    var llm = data.llm || {};
+    var failed = (DATA.fetch_log || []).filter(function(x){ return !x.ok; });
+    var llm = DATA.llm || {};
+    var r = DATA.routing || {};
 
-    renderSubject(data.subject || {});
-    renderComposition(s, s.total || 0);
-    renderSections(data.evidence || []);
-    bindInteractions();
+    renderSubject(DATA.subject || {});
+    renderCompanyTypeBadge((DATA.routing || {}).company_type);
+    renderAll();
 
     document.getElementById('stamp').innerHTML =
-      '数据时点　' + esc(fmtStamp(data.generated_at)) + '<br>' +
+      '数据时点　' + esc(fmtStamp(DATA.generated_at)) + '<br>' +
       '来源　同花顺金融数据服务（扶摇）<br>' +
       '本页不构成投资建议';
     document.getElementById('result').hidden = false;
 
     var notes = [];
-    notes.push('取数 ' + (data.fetch_log || []).length + ' 次，其中失败 ' + failed.length +
+    notes.push('取数 ' + (DATA.fetch_log || []).length + ' 次，其中失败 ' + failed.length +
                ' 次（已如实标为「未知」）。');
     if (llm.status === 'ok') {
       notes.push('推断层已启用：' + esc(llm.provider) + ' / ' + esc(llm.model) +
                  '，接受 ' + llm.accepted + ' 条，丢弃 ' + (llm.dropped || []).length + ' 条。');
+      (llm.dropped || []).forEach(function(d){
+        notes.push('　× 丢弃解读「' + esc(String(d.claim).slice(0, 30)) + '…」 —— ' + esc(d.reason));
+      });
     } else if (llm.status) {
       notes.push('推断层' + (llm.status === 'disabled' ? '未启用' : '异常') + '：' +
                  esc(llm.detail || ''));
@@ -470,23 +620,39 @@ async function runDiagnosis(code, peers){
     showStatus('ok', notes.join('<br>'));
 
   } catch (err) {
+    DATA = null;
     showStatus('error',
       '<b>诊断失败。</b>没有生成任何结论，也没有用模拟数据代替。<br>' +
       '原因：' + esc(err.message) +
       '<pre>请检查：① 扶摇 API Key 是否配置（~/.hithink-finance/credentials.env）' +
       '② 股票代码是否正确 ③ 网络是否可达 fuyao.aicubes.cn</pre>');
   } finally {
+    clearInterval(tick);
     go.disabled = false;
   }
 }
 
 document.getElementById('form').addEventListener('submit', function(ev){
   ev.preventDefault();
-  runDiagnosis(document.getElementById('code').value.trim(),
-               document.getElementById('peers').value.trim());
+  runDiagnosis(
+    document.getElementById('code').value.trim(),
+    document.getElementById('peers').value.trim(),
+    document.getElementById('question').value.trim(),
+    document.getElementById('ctype').value
+  );
 });
 
-runDiagnosis('600519.SH', '000858.SZ,000568.SZ,002304.SZ');
+document.querySelectorAll('#chips .chip').forEach(function(c){
+  c.addEventListener('click', function(){
+    document.getElementById('question').value = c.dataset.q || '';
+    document.querySelectorAll('#chips .chip').forEach(function(o){
+      o.setAttribute('aria-pressed', String(o === c));
+    });
+    document.getElementById('form').dispatchEvent(new Event('submit', { cancelable: true }));
+  });
+});
+
+runDiagnosis('600519.SH', '000858.SZ,000568.SZ,002304.SZ', '', 'auto');
 </script>
 </body>
 </html>

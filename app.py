@@ -55,7 +55,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            # 客户端提前断开（多为等太久主动取消）。这是客户端行为，不是服务端错误，
+            # 不该在日志里刷一大段 traceback。
+            sys.stderr.write("[http] 客户端提前断开，响应未写完（通常是因为等待超时）\n")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        """健康检查。预览面板会先发 HEAD，不实现它会返回 501，面板会认为服务异常。"""
+        parsed = urllib.parse.urlparse(self.path)
+        known = parsed.path in ("/", "/index.html", "/api/diagnose")
+        self.send_response(200 if known else 404)
+        self.send_header("Content-Type",
+                         "text/html; charset=utf-8"
+                         if parsed.path in ("/", "/index.html")
+                         else "application/json; charset=utf-8")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _json(self, status: int, obj) -> None:
         self._send(status, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
@@ -78,12 +95,15 @@ class Handler(BaseHTTPRequestHandler):
             code = normalize_code((qs.get("code") or [""])[0])
             peers_raw = (qs.get("peers") or [DEFAULT_PEERS])[0]
             peers = [normalize_code(p) for p in peers_raw.split(",") if p.strip()]
+            question = (qs.get("question") or [""])[0].strip()
+            ctype = (qs.get("type") or [""])[0].strip()
 
             if not code:
                 self._json(400, {"error": "缺少参数 code", "示例": "/api/diagnose?code=600519.SH"})
                 return
             try:
-                result = diagnose.diagnose(code, peers=peers)
+                result = diagnose.diagnose(code, peers=peers,
+                                           question=question, company_type=ctype)
             except Exception:  # noqa: BLE001 - 任何异常都要变成结构化错误，不能白屏
                 self._json(500, {"error": "诊断过程异常",
                                  "traceback": traceback.format_exc()[-1800:]})

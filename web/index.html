@@ -29,12 +29,13 @@ body{margin:0;background:var(--scaffold);color:var(--ink);font-family:var(--sans
 
 .ask{padding:22px 0 4px}
 .ask form{display:block}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
 .row + .row{margin-top:12px}
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:11px;color:var(--muted);letter-spacing:.05em}
 .field input,.field select{font:inherit;font-size:14px;padding:7px 11px;
-  border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
+  border:1px solid var(--rule);background:var(--paper);color:var(--ink);
+  height:39px}   /* 显式统一高度：input 与 select 的默认渲染高度天然差 2px */
 .field input{font-family:var(--mono)}
 .field select{min-width:160px}
 .autohint{font-size:11px;color:var(--muted);max-width:210px;line-height:1.5}
@@ -187,6 +188,8 @@ body{margin:0;background:var(--scaffold);color:var(--ink);font-family:var(--sans
   .sheet{padding:0 18px 60px}
   .subject h1{font-size:26px}
   .quote{text-align:left}
+  .field,.field.wide{width:100%;min-width:0}
+  .field input,.field select{width:100%}
   .ev-btn{grid-template-columns:auto 1fr;gap:10px}
   .caret{grid-column:2}
   .dtable th{width:84px}
@@ -529,6 +532,28 @@ function bindInteractions(){
   });
 }
 
+/* ---------- 前置检查：页面是怎么打开的 ---------- */
+
+function preflightCheck(){
+  if (location.protocol === 'file:'){
+    return { ok: false, html:
+      '<b>页面是以「本地文件」方式打开的，调不通后端。</b><br>' +
+      '这个页面必须由本地服务提供，不能双击打开。请：<br>' +
+      '<pre>cd /d/mingjian\npython app.py</pre>' +
+      '然后在浏览器访问 <b>http://127.0.0.1:8765/</b><br>' +
+      '（注意地址要带 <b>http://</b> 开头，不要直接打开 index.html 文件）' };
+  }
+  return { ok: true };
+}
+
+function networkHint(){
+  if (location.protocol === 'file:'){
+    return '页面是以本地文件方式打开的，没有后端可调用。请运行 python app.py 后访问 http://127.0.0.1:8765/';
+  }
+  return '连不上本地服务。请确认 <b>python app.py</b> 仍在运行（那个窗口不要关），' +
+         '且当前地址是 <b>http://127.0.0.1:8765/</b>';
+}
+
 /* ---------- 状态 ---------- */
 
 function showStatus(kind, html){
@@ -546,7 +571,12 @@ function hideStatus(){
 
 var DATA = null;
 var SHOW_ALL = false;
-var INFLIGHT = null;      // 正在跑的诊断请求，新请求会先取消它
+var INFLIGHT = null;      // { ctrl, key } —— 正在跑的诊断
+var INFLIGHT_KEY = '';    // 正在跑的请求参数指纹
+
+function requestKey(code, peers, question, ctype){
+  return [code, peers, question, ctype].join('');
+}
 
 function visibleEvidence(){
   if (!DATA) return [];
@@ -568,14 +598,20 @@ function renderAll(){
 }
 
 async function runDiagnosis(code, peers, question, ctype){
-  // 关键：先把上一次还在飞的请求取消掉。
-  // 否则连点 / 换股票 / 点问题 chip 会让多个诊断并发叠加 ——
-  // 每个诊断内部还有 3 路并发，几个叠起来就把上游打到限流，越等越久。
+  var key = requestKey(code, peers, question, ctype);
+
+  // 参数完全相同、且上一次还在跑 —— 什么都别做，接着等。
+  // 这一点很重要：如果这里"取消旧的、重开新的"，用户没耐心多点两下
+  // 就会变成「每点一次都从头开始，永远跑不完」。
+  if (INFLIGHT && INFLIGHT_KEY === key) return;
+
+  // 参数变了才取消旧的（换股票 / 换问题 / 换类型）
   if (INFLIGHT){
     try { INFLIGHT.abort(); } catch (e) { /* 忽略 */ }
   }
   var ctrl = new AbortController();
   INFLIGHT = ctrl;
+  INFLIGHT_KEY = key;
 
   var go = document.getElementById('go');
   go.disabled = true;
@@ -639,14 +675,16 @@ async function runDiagnosis(code, peers, question, ctype){
     DATA = null;
     showStatus('error',
       '<b>诊断失败。</b>没有生成任何结论，也没有用模拟数据代替。<br>' +
-      '原因：' + esc(err.message) +
-      '<pre>请检查：① 扶摇 API Key 是否配置（~/.hithink-finance/credentials.env）' +
-      '② 股票代码是否正确 ③ 网络是否可达 fuyao.aicubes.cn</pre>');
+      '原因：' + esc(err.message || String(err)) +
+      '<pre>' + networkHint() +
+      '\n\n若以上都没问题，再检查：扶摇 API Key 是否配置（~/.hithink-finance/credentials.env）' +
+      '\n以及股票代码是否正确。</pre>');
   } finally {
     clearInterval(tick);
     // 只有"当前这个请求仍是最新的"时才解锁按钮，避免旧请求提前解锁
     if (INFLIGHT === ctrl){
       INFLIGHT = null;
+      INFLIGHT_KEY = '';
       go.disabled = false;
     }
   }
@@ -672,7 +710,16 @@ document.querySelectorAll('#chips .chip').forEach(function(c){
   });
 });
 
-runDiagnosis('600519.SH', '000858.SZ,000568.SZ,002304.SZ', '', 'auto');
+// 启动前先看这个页面是怎么打开的 —— 用错方式就直说，不要等用户点半天才报一个含糊的错
+(function boot(){
+  var pf = preflightCheck();
+  if (!pf.ok){
+    showStatus('error', pf.html);
+    document.getElementById('go').disabled = true;
+    return;
+  }
+  runDiagnosis('600519.SH', '000858.SZ,000568.SZ,002304.SZ', '', 'auto');
+})();
 </script>
 </body>
 </html>

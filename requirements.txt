@@ -1,0 +1,6 @@
+# 取数 + 证据引擎：只用标准库，无第三方依赖。
+#   python diagnose.py 600519.SH --peers 000858.SZ,000568.SZ,002304.SZ --out out/600519.json
+
+# 下面是 Web 服务层（app.py）需要时再装：
+# fastapi>=0.110
+# uvicorn[standard]>=0.29

@@ -1,0 +1,26 @@
+# 绝不能提交进仓库的东西
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 凭据与本地环境 —— 题目明令禁止提交 API Key
+.env
+.env.*
+!.env.example
+credentials
+credentials.*
+*hithink-finance*
+!fuyao.py
+
+# 运行产物
+out/
+*.log
+.pytest_cache/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
